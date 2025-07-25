@@ -6,96 +6,67 @@ require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware to parse incoming Twilio POST data
+// Middleware to parse incoming form data
 app.use(bodyParser.urlencoded({ extended: false }));
 
-app.post('/bridge-call', (req, res) => {
-  const { To } = req.body; // The customer's phone number (the person you want to call)
+const accountSid = process.env.TWILIO_ACCOUNT_SID;
+const authToken = process.env.TWILIO_AUTH_TOKEN;
+const twilioClient = twilio(accountSid, authToken);
+
+// Endpoint that starts the call
+app.post('/bridge-call', async (req, res) => {
+  const { To } = req.body;
 
   if (!To) {
     return res.status(400).send('Missing "To" parameter');
   }
 
-  const twiml = new twilio.twiml.VoiceResponse();
+  try {
+    await twilioClient.calls.create({
+      url: `${process.env.BASE_URL}/twiml?customer=${encodeURIComponent(To)}`,
+      to: process.env.MY_PHONE_NUMBER,
+      from: process.env.TWILIO_PHONE_NUMBER
+    });
 
-  // First, call your phone number
-  const dial = twiml.dial();
-  dial.number(
-    {
-      action: `/connect-customer?customer=${encodeURIComponent(To)}`,
-      method: 'POST'
-    },
-    process.env.MY_PHONE_NUMBER // Your own phone number
-  );
-
-  res.type('text/xml');
-  res.send(twiml.toString());
-});
-
-app.post('/connect-customer', (req, res) => {
-  const customer = req.query.customer;
-
-  const twiml = new twilio.twiml.VoiceResponse();
-  const dial = twiml.dial();
-  dial.number(customer); // Dial the customer after you've answered
-
-  res.type('text/xml');
-  res.send(twiml.toString());
-});
-
-app.get('/', (req, res) => {
-  res.send('Twilio Call Bridge server is running.');
-});
-
-
-//const app = express();
-//const port = process.env.PORT || 3000;
-
-// Middleware to parse incoming Twilio POST data
-app.use(bodyParser.urlencoded({ extended: false }));
-
-app.post('/bridge-call', (req, res) => {
-  const { To } = req.body; // The customer's phone number (the person you want to call)
-
-  if (!To) {
-    return res.status(400).send('Missing "To" parameter');
+    res.send('Call initiated!');
+  } catch (err) {
+    console.error('Failed to initiate call:', err.message);
+    res.status(500).send('Failed to initiate call');
   }
-
-  const twiml = new twilio.twiml.VoiceResponse();
-
-  // First, call your phone number
-  const dial = twiml.dial();
-  dial.number(
-    {
-      action: `/connect-customer?customer=${encodeURIComponent(To)}`,
-      method: 'POST'
-    },
-    process.env.MY_PHONE_NUMBER // Your own phone number
-  );
-
-  res.type('text/xml');
-  res.send(twiml.toString());
 });
 
-app.post('/connect-customer', (req, res) => {
+// Twilio calls this to get the instructions for bridging
+app.post('/twiml', (req, res) => {
   const customer = req.query.customer;
 
   const twiml = new twilio.twiml.VoiceResponse();
   const dial = twiml.dial();
-  dial.number(customer); // Dial the customer after you've answered
+  dial.number({
+    action: `/connect-customer?customer=${encodeURIComponent(customer)}`,
+    method: 'POST'
+  }, process.env.MY_PHONE_NUMBER);
 
   res.type('text/xml');
   res.send(twiml.toString());
 });
 
+// Once you answer, Twilio calls this to dial the customer
+app.post('/connect-customer', (req, res) => {
+  const customer = req.query.customer;
+
+  const twiml = new twilio.twiml.VoiceResponse();
+  twiml.dial().number(customer);
+
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
+
+// Health check
 app.get('/', (req, res) => {
   res.send('Twilio Call Bridge server is running.');
 });
 
-//app.listen(port, () => {
-//  console.log(`🚀 Server running on port ${port}`);
-//});
-
+// Start server
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
 });
